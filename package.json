@@ -1,0 +1,28 @@
+{
+  "name": "oraplot-relay",
+  "version": "1.0.0",
+  "description": "Customer-owned encrypted booking integrations and reminder events for Oraplot",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test src/crypto.test.ts src/format.test.ts",
+    "typecheck": "tsc --noEmit",
+    "build:check": "wrangler deploy --dry-run --outdir .wrangler/build",
+    "test:lifecycle": "node --test test/lifecycle.test.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "@noble/ciphers": "^2.4.0",
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.4.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260928.1",
+    "libsodium-wrappers-sumo": "^0.8.4",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.143.0"
+  }
+}

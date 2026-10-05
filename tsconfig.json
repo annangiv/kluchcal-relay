@@ -1,0 +1,1 @@
+{ "compilerOptions": { "target": "ES2022", "lib": ["ES2022"], "skipLibCheck": true, "module": "ES2022", "moduleResolution": "bundler", "strict": true, "types": ["@cloudflare/workers-types"], "noEmit": true, "allowImportingTsExtensions": true }, "include": ["src/index.ts", "src/crypto.ts", "test-receiver/index.ts"] }

@@ -1,0 +1,18 @@
+{
+  // Oraplot relay. Runs in YOUR Cloudflare account and makes its own key on
+  // first start (kept in the RelayKeys Durable Object). Set WEBHOOK_URL.
+  "name": "oraplot-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": true,
+  "secrets": { "required": ["WEBHOOK_URL"] },
+  "observability": { "enabled": false },
+  "durable_objects": { "bindings": [{ "name": "KEYS", "class_name": "RelayKeys" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RelayKeys"] }],
+  "vars": {
+    // Leave as is. Only change for a self-hosted Oraplot.
+    "ORAPLOT_ORIGIN": "https://oraplot.com",
+    // Leave empty in production. For local testing, paste the key Oraplot shows.
+    "ORAPLOT_PUBLIC_KEY": ""
+  }
+}
