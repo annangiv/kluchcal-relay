@@ -1,11 +1,11 @@
 {
   // Oraplot relay. Runs in YOUR Cloudflare account and makes its own key on
-  // first start (kept in the RelayKeys Durable Object). Set WEBHOOK_URL.
+  // first start (kept in the RelayKeys Durable Object). Set WEBHOOK_URL and RELAY_PAIRING_TOKEN (32+ random characters).
   "name": "oraplot-relay",
   "main": "src/index.ts",
   "compatibility_date": "2026-09-01",
   "workers_dev": true,
-  "secrets": { "required": ["WEBHOOK_URL"] },
+  "secrets": { "required": ["WEBHOOK_URL","RELAY_PAIRING_TOKEN"] },
   "observability": { "enabled": false },
   "durable_objects": { "bindings": [{ "name": "KEYS", "class_name": "RelayKeys" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RelayKeys"] }],
