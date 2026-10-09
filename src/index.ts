@@ -4,12 +4,13 @@ import {tokenMatches,validBinding,sameBinding,type Binding} from './ownership'
 import {ed25519,x25519} from '@noble/curves/ed25519.js'
 import {decryptSubmission,fromB64,publicKeyFor,toB64} from './crypto'
 import {targetFor,bodyFor,type Readable} from './format'
+import {classifyError,classifyResponse,retryDelay,type Outcome} from './delivery'
 export interface Env {
  KEYS:DurableObjectNamespace<RelayKeys>;WEBHOOK_URL:string;KLUCHCAL_ORIGIN?:string;ORAPLOT_ORIGIN?:string;
  RELAY_PAIRING_TOKEN:string;WEBHOOK_IDEMPOTENT?:string;KLUCHCAL_PUBLIC_KEY?:string;ORAPLOT_PUBLIC_KEY?:string;WEBHOOK_SERVICE?:Fetcher;WEBHOOK_FORMAT?:string;
 }
 type Delivery={integration_id:string;workspace_id:string;event:string;booking:{id:string;version:number;starts_at?:string;ends_at?:string;status?:string};form?:{id:string;title:string};submission?:{id:string;key_version:number;sealed_key:string;ciphertext:string;created_at:number};sealed_form_sk?:string}
-type Job={delivery:Delivery;next:number;attempts:number;reminderAt?:number;sent:boolean;sending?:boolean;blocked?:boolean}
+type Job={delivery:Delivery;next:number;attempts:number;reminderAt?:number;sent:boolean;sending?:boolean;blocked?:boolean;blockedReason?:'uncertain'|'exhausted'|'unbound'}
 function json(value:unknown,status=200){return new Response(JSON.stringify(value),{status,headers:{'content-type':'application/json'}})}
 export class RelayKeys extends DurableObject<Env> {
  async secretKey():Promise<Uint8Array>{
@@ -42,7 +43,7 @@ export class RelayKeys extends DurableObject<Env> {
   return this.ctx.blockConcurrencyWhile(async()=>{
    const key=`booking:${binding.integration_id}:${bookingId}`;const job=await this.ctx.storage.get<Job>(key)
    if(!job?.blocked)return false
-   job.blocked=false;job.sending=false;job.next=Date.now();await this.ctx.storage.put(key,job);await this.scheduleNext();return true
+   job.blocked=false;delete job.blockedReason;job.sending=false;job.attempts=0;job.next=Date.now();await this.ctx.storage.put(key,job);await this.scheduleNext();return true
   })
  }
  async accept(delivery:Delivery):Promise<void>{
@@ -67,22 +68,33 @@ export class RelayKeys extends DurableObject<Env> {
    for(const [key,job] of rows){
     if(job.blocked)continue
     const binding={integration_id:job.delivery.integration_id,workspace_id:job.delivery.workspace_id,form_id:job.delivery.form?.id||''}
-    if(!validBinding(binding)||!await this.bound(binding)||(job.sending&&this.env.WEBHOOK_IDEMPOTENT!=='1')){job.blocked=true;await this.ctx.storage.put(key,job);continue}
+    if(!validBinding(binding)||!await this.bound(binding)||(job.sending&&this.env.WEBHOOK_IDEMPOTENT!=='1')){job.blocked=true;job.blockedReason=job.sending?'uncertain':'unbound';await this.ctx.storage.put(key,job);continue}
     const reminder=job.sent&&job.reminderAt!==undefined&&job.reminderAt<=Date.now()
     if(!reminder&&(job.sent||job.next>Date.now()))continue
     job.sending=true;await this.ctx.storage.put(key,job)
-    try{
-     const out=await this.output(job.delivery,reminder?'reminder':job.delivery.event)
+    const event=reminder?'reminder':job.delivery.event
+    let outcome:Outcome
+    let out:unknown
+    // Building the body is local: a failure means nothing was sent.
+    try{out=await this.output(job.delivery,event)}catch{out=undefined}
+    if(out===undefined)outcome={kind:'retry'}
+    else{
      const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),10000)
-     let response:Response
-     try {const init={method:'POST',headers:{'content-type':'application/json','user-agent':'kluchcal-relay/2','idempotency-key':`${job.delivery.integration_id}:${job.delivery.booking.id}:${job.delivery.booking.version}:${reminder?'reminder':job.delivery.event}`},body:JSON.stringify(out),signal:controller.signal};response=this.env.WEBHOOK_SERVICE?await this.env.WEBHOOK_SERVICE.fetch(this.env.WEBHOOK_URL,init):await fetch(this.env.WEBHOOK_URL,init)}finally{clearTimeout(timer)}
-     if(!response.ok)throw new Error('destination did not accept delivery')
-     if(reminder)delete job.reminderAt;else job.sent=true
-     job.attempts=0;job.sending=false
-    }catch{
-     // Never log plaintext, keys, webhook destinations or delivery bodies.
-     job.sending=false;if(this.env.WEBHOOK_IDEMPOTENT!=='1')job.blocked=true
-     job.attempts++;const retry=Date.now()+Math.min(3600000,5000*2**Math.min(job.attempts,10));if(reminder)job.reminderAt=retry;else job.next=retry
+     try{
+      const init={method:'POST',headers:{'content-type':'application/json','user-agent':'kluchcal-relay/2','idempotency-key':`${job.delivery.integration_id}:${job.delivery.booking.id}:${job.delivery.booking.version}:${event}`},body:JSON.stringify(out),signal:controller.signal}
+      const response=this.env.WEBHOOK_SERVICE?await this.env.WEBHOOK_SERVICE.fetch(this.env.WEBHOOK_URL,init):await fetch(this.env.WEBHOOK_URL,init)
+      outcome=classifyResponse(response.status,response.headers.get('retry-after'))
+     }catch(error){outcome=classifyError(error)}finally{clearTimeout(timer)}
+    }
+    // Never log plaintext, keys, webhook destinations or delivery bodies.
+    job.sending=false
+    if(outcome.kind==='delivered'){if(reminder)delete job.reminderAt;else job.sent=true;job.attempts=0}
+    else if(outcome.kind==='uncertain'&&this.env.WEBHOOK_IDEMPOTENT!=='1'){job.blocked=true;job.blockedReason='uncertain'}
+    else{
+     // Definite failures (and uncertain ones for an idempotent receiver) retry with a bounded backoff.
+     job.attempts++;const delay=retryDelay(job.attempts,outcome.kind==='retry'?outcome.retryAfterMs:undefined)
+     if(delay===null){job.blocked=true;job.blockedReason='exhausted'}
+     else{const retry=Date.now()+delay;if(reminder)job.reminderAt=retry;else job.next=retry}
     }
     // Persist ciphertext for retries. Successful deletion keeps only a version tombstone.
     if(job.sent&&job.delivery.event==='deleted')job.delivery={event:'deleted',booking:job.delivery.booking,integration_id:job.delivery.integration_id,workspace_id:job.delivery.workspace_id,form:job.delivery.form}
@@ -149,7 +161,8 @@ export default {
    const binding={integration_id:d.integration_id,workspace_id:d.workspace_id,form_id:d.form?.id||''}
    if(!validBinding(binding))return json({error:'invalid binding'},400)
    if(u.pathname==='/revoke')return await state.revoke(binding)?json({revoked:true}):json({error:'unknown binding'},403)
-   if(!await state.bound(binding))return json({error:'Unpaired, expired or revoked relay; reconnect with the owner code'},403)
+   // KluchCal recognizes `code` and stops delivering until the owner reconnects.
+   if(!await state.bound(binding))return json({error:'Unpaired, expired or revoked relay; reconnect with the owner code',code:'binding_inactive'},403)
    if(!d.booking?.id||!Number.isInteger(d.booking.version)||d.booking.version<1||!['created','confirmed','cancelled','completed','no_show','rescheduled','deleted'].includes(d.event))return json({error:'invalid event'},400)
    if(d.event!=='deleted'){
     if(!d.form||!d.submission||!d.sealed_form_sk)return json({error:'missing encrypted envelope'},422)

@@ -20,7 +20,7 @@ For a self-hosted KluchCal, set `KLUCHCAL_ORIGIN` to your app's public HTTPS ori
 
 - Accepts signed booking events: created, confirmed, rescheduled, cancelled, completed, no-show, and deleted.
 - Requires an owner-authenticated, immutable integration/calendar/workspace binding, plus an Ed25519 signature and a five-minute timestamp window before opening ciphertext. A public encryption key alone never authorizes delivery.
-- Stores encrypted events durably. It forwards readable data only to your configured destination. Ambiguous downstream delivery stops for owner review by default.
+- Stores encrypted events durably. It forwards readable data only to your configured destination. A definite rejection (any HTTP error status including 408/429/5xx, or a connection/DNS/TLS failure before sending) is retried with backoff: 10 attempts over about 17 hours, honouring `Retry-After`. Only an ambiguous send (timed out or dropped after the request went out) stops for owner review by default. Reminders keep working after a retried failure.
 - Keeps one current version per booking. Replayed or older versions cannot replace newer jobs.
 - Schedules one **reminder event 24 hours before** an active appointment when that time is still in the future. Rescheduling replaces the pending reminder; cancellation, completion, and deletion remove it.
 - Returns only acceptance/status information to KluchCal. A `202` means durably accepted; webhook delivery happens asynchronously.
@@ -50,7 +50,7 @@ Generic webhooks receive JSON like:
 }
 ```
 
-Map fields in your automation tool. Use `booking.id` to update or delete the same external record. Use the stable `Idempotency-Key` header (`integration:booking:version:event`) to deduplicate deliveries. A destination might process a request before its reply is lost. Automatic retries are enabled only when you explicitly set `WEBHOOK_IDEMPOTENT=1` and your receiver enforces that key. Standard chat webhooks generally do not enforce it. Delete events contain only the source, event, event ID, and booking ID/version.
+Map fields in your automation tool. Use `booking.id` to update or delete the same external record. Use the stable `Idempotency-Key` header (`integration:booking:version:event`) to deduplicate deliveries. A destination might process a request before its reply is lost. Ambiguous sends are retried automatically only when you explicitly set `WEBHOOK_IDEMPOTENT=1` and your receiver enforces that key; definite rejections are always retried, because the destination did not accept them. Standard chat webhooks generally do not enforce it. Delete events contain only the source, event, event ID, and booking ID/version.
 
 Chat destinations receive their native message format. Set `WEBHOOK_FORMAT` to `json`, `slack`, `discord`, `google_chat`, or `teams` to override automatic detection. File keys must never be forwarded to chat/webhook destinations; file references are reduced to filenames by the formatter. Download encrypted attachments through KluchCal's unlocked dashboard.
 
@@ -60,7 +60,7 @@ Chat destinations receive their native message format. Set `WEBHOOK_FORMAT` to `
 | --- | --- |
 | `WEBHOOK_URL` | Required secret: your destination |
 | `RELAY_PAIRING_TOKEN` | Required random owner secret, at least 32 characters |
-| `WEBHOOK_IDEMPOTENT` | Set to `1` only when the destination enforces the stable idempotency key |
+| `WEBHOOK_IDEMPOTENT` | Set to `1` only when the destination enforces the stable idempotency key; ambiguous sends are then retried too |
 | `KLUCHCAL_ORIGIN` | App to trust; default `https://kluchcal.com` |
 | `KLUCHCAL_PUBLIC_KEY` | Optional pinned delivery signing key |
 | `ORAPLOT_ORIGIN`, `ORAPLOT_PUBLIC_KEY` | Legacy aliases; the corresponding nonempty `KLUCHCAL_*` setting takes precedence |
@@ -92,7 +92,9 @@ The relay is an authorized decryption endpoint in your Cloudflare account. Cloud
 
 Pairings expire after 90 days and cannot be overwritten, even after expiry or revocation. Disconnect, rotate the calendar key, and reconnect with the owner code to renew. On upgrade, old connections fail closed; update both the relay and app, then disconnect and reconnect.
 
-For a blocked ambiguous delivery, first inspect the receiver to decide whether repeating it is safe. Only then POST JSON `{ "integration_id": "...", "form_id": "...", "workspace_id": "...", "booking_id": "..." }` to `/retry` with `Authorization: Bearer <RELAY_PAIRING_TOKEN>`. This is an explicit owner retry and can duplicate an already-processed event. Never put the code in a URL or logs. Revocation and expiry cannot be bypassed by retry.
+Deliveries to an unpaired, expired or revoked binding are answered with `403` and `code: "binding_inactive"`; KluchCal then stops delivering to that connection and shows it as needing re-pairing.
+
+An event that failed all 10 attempts, or an ambiguous delivery, is blocked. For a blocked delivery, first inspect the receiver to decide whether repeating it is safe. Only then POST JSON `{ "integration_id": "...", "form_id": "...", "workspace_id": "...", "booking_id": "..." }` to `/retry` with `Authorization: Bearer <RELAY_PAIRING_TOKEN>`. This is an explicit owner retry and can duplicate an already-processed event. Never put the code in a URL or logs. Revocation and expiry cannot be bypassed by retry.
 
 Successful deletion removes stored ciphertext for that booking and keeps a small booking ID/version tombstone to reject delayed events. Downstream deletion depends on what your destination supports. Ciphertext retry jobs and signing metadata are not a guarantee of anonymity: the scheduling app still knows reservation times, duration, calendar, and status.
 
@@ -110,4 +112,4 @@ npm run build:check
 npm run test:lifecycle
 ```
 
-The lifecycle test runs locally with Miniflare, generates disposable test keys, and uses a mock destination. It checks signed delivery, retries, replay protection, cancellation, reminder replacement, and deletion without a Cloudflare account or production credentials.
+The lifecycle test runs locally with Miniflare, generates disposable test keys, and uses a mock destination. It checks signed delivery, retries, replay protection, cancellation, reminder replacement, and deletion without a Cloudflare account or production credentials, both with `WEBHOOK_IDEMPOTENT=1` and in the default mode (503/429 retried, reminders continue after a failure, a timed-out send blocks until an owner retry).

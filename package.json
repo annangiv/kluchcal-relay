@@ -4,7 +4,7 @@
   "description": "Customer-owned encrypted booking integrations and reminder events for KluchCal",
   "main": "index.js",
   "scripts": {
-    "test": "node --test src/crypto.test.ts src/format.test.ts src/ownership.test.ts",
+    "test": "node --test src/crypto.test.ts src/format.test.ts src/ownership.test.ts src/delivery.test.ts",
     "typecheck": "tsc --noEmit",
     "build:check": "wrangler deploy --dry-run --outdir .wrangler/build",
     "test:lifecycle": "node --test test/lifecycle.test.mjs"

@@ -42,20 +42,38 @@ test('pairing cannot overwrite; tenant/form checks, expiry and revocation fail c
   assert.equal(await state.bound(binding), false)
   assert.equal(await state.pair(binding), false)
 })
-test('ambiguous downstream delivery blocks until owner explicitly retries', async () => {
-  let calls=0
-  const {state}=relayState({WEBHOOK_URL:'https://example.invalid',WEBHOOK_SERVICE:{async fetch(){calls++;return new Response('',{status:calls===1?500:200})}}})
+test('definite failures retry by default; only an ambiguous send blocks until the owner retries', async () => {
+  let calls=0,mode:'status'|'lost'='status'
+  const {state,data}=relayState({WEBHOOK_URL:'https://example.invalid',WEBHOOK_SERVICE:{async fetch(){calls++;if(mode==='lost')throw new TypeError('Network connection lost.');return new Response('',{status:calls===1?500:200})}}})
   await state.pair(binding)
   const delivery={integration_id:binding.integration_id,workspace_id:binding.workspace_id,form:{id:binding.form_id,title:'Test'},event:'deleted',booking:{id:'booking',version:1}}
+  const job=(id='booking')=>data.get(`booking:integration:${id}`) as {blocked?:boolean;blockedReason?:string;next:number;attempts:number;sent:boolean}
   await state.accept(delivery)
   await state.alarm();assert.equal(calls,1)
-  await state.accept(delivery);await state.alarm();assert.equal(calls,1)
-  assert.equal(await state.retry({...binding,workspace_id:'attacker'},'booking'),false)
-  assert.equal(await state.retry(binding,'booking'),true)
-  await state.alarm();assert.equal(calls,2)
+  // A 500 is a definite rejection: not blocked, retried after the backoff.
+  assert.equal(job().blocked,undefined);assert.equal(job().attempts,1);assert.ok(job().next>Date.now())
+  job().next=Date.now();await state.alarm();assert.equal(calls,2);assert.equal(job().sent,true)
   await state.accept(delivery);await state.alarm();assert.equal(calls,2)
+  // A dropped connection after sending is uncertain: blocked for owner review.
+  mode='lost'
+  await state.accept({...delivery,booking:{id:'lost',version:1}});await state.alarm();assert.equal(calls,3)
+  assert.equal(job('lost').blocked,true);assert.equal(job('lost').blockedReason,'uncertain')
+  await state.alarm();assert.equal(calls,3)
+  assert.equal(await state.retry({...binding,workspace_id:'attacker'},'lost'),false)
+  mode='status';assert.equal(await state.retry(binding,'lost'),true)
+  await state.alarm();assert.equal(calls,4);assert.equal(job('lost').sent,true)
   await state.revoke(binding)
-  await state.accept({...delivery,booking:{id:'another',version:1}});await state.alarm();assert.equal(calls,2)
+  await state.accept({...delivery,booking:{id:'another',version:1}});await state.alarm();assert.equal(calls,4)
+})
+
+test('delivery to an unbound integration is answered with a recognizable code', async () => {
+  const env = await requestEnv({})
+  const { state } = relayState()
+  const unbound = { ...env, KEYS: { idFromName() { return 'relay' }, get() { return state } } }
+  const signing = ed25519.utils.randomSecretKey()
+  const response = await worker.fetch(signedRequest(signing, 'kluchcal'), { ...unbound, KLUCHCAL_PUBLIC_KEY: toB64(ed25519.getPublicKey(signing)) } as never)
+  assert.equal(response.status, 403)
+  assert.equal((await response.json() as {code:string}).code, 'binding_inactive')
 })
 
 test('new and legacy pinned keys and signed header pairs stay interoperable', async () => {
