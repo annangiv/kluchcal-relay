@@ -1,7 +1,13 @@
 {
   // KluchCal relay. Runs in YOUR Cloudflare account and makes its own key on
   // first start (kept in the RelayKeys Durable Object). Set WEBHOOK_URL and RELAY_PAIRING_TOKEN (32+ random characters).
-  "name": "kluchcal-relay",
+  // Keep the existing Worker name. The Durable Object holding the relay's private
+  // key, pairings and queued jobs belongs to this Worker; deploying under a new
+  // name creates a separate, empty relay. To rename safely, deploy the new name
+  // as a second Worker, connect it in KluchCal as a new relay (new pairing), then
+  // disconnect and delete the old Worker. Never delete or recreate the KEYS
+  // binding, RelayKeys class or v1 migration of a deployed Worker.
+  "name": "oraplot-relay",
   "main": "src/index.ts",
   "compatibility_date": "2026-09-01",
   "workers_dev": true,

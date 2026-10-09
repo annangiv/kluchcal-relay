@@ -7,7 +7,7 @@ Run your booking integrations in **your own Cloudflare account**. KluchCal sends
 ## Connect in three steps
 
 1. Click **Deploy to Cloudflare**, sign in, and set `WEBHOOK_URL` to your Zapier, Make, n8n, Slack, Discord, Google Chat, Teams, or custom webhook. Set a random `RELAY_PAIRING_TOKEN` secret of at least 32 characters. Deploy.
-2. Copy the Worker's address, such as `https://kluchcal-relay.you.workers.dev`.
+2. Copy the Worker's address, such as `https://oraplot-relay.you.workers.dev` (the Worker keeps its original name; see **Upgrading an existing relay**).
 3. In KluchCal, open the calendar, unlock your vault, expand **Your relay & integrations**, paste the address and your owner pairing code, and click **Connect**.
 
 The pairing code authorizes connection to your Worker and is not saved by KluchCal. The relay generates its own X25519 key pair and keeps its private key in a Durable Object in your account. Your browser seals the calendar key to the relay's public key.
@@ -78,7 +78,9 @@ npx wrangler secret put RELAY_PAIRING_TOKEN
 
 ## Upgrading an existing relay
 
-KluchCal is the new product name. Existing deployments keep their private key and pairings only when you update the **same Worker and Durable Object namespace**. The default Worker name is now `kluchcal-relay` for new installations. For an existing Worker, retain its current name in `wrangler.jsonc` or deploy with `npx wrangler deploy --name <existing-worker-name>`; do not delete or recreate its `KEYS` binding, `RelayKeys` class, or `v1` migration.
+KluchCal is the new product name. Existing deployments keep their private key and pairings only when you update the **same Worker and Durable Object namespace**, so `wrangler.jsonc` keeps the original Worker name `oraplot-relay`. If your Worker has another name, deploy with `npx wrangler deploy --name <existing-worker-name>`. Do not delete or recreate its `KEYS` binding, `RelayKeys` class, or `v1` migration. To move to a new Worker name, deploy it as a second Worker, connect it in KluchCal as a new relay, then disconnect and delete the old one.
+
+Deploying replaces the Worker's variables with those in `wrangler.jsonc`. Until the app is served at `https://kluchcal.com`, set `KLUCHCAL_ORIGIN` in `wrangler.jsonc` (or with `--var`) to the origin that serves it today, for example `https://oraplot.com`, or deliveries fail signature verification.
 
 Old `ORAPLOT_ORIGIN` and `ORAPLOT_PUBLIC_KEY` settings still work when the corresponding new setting is absent or empty. When moving an existing custom origin into the new configuration, set `KLUCHCAL_ORIGIN` explicitly so the new default does not override it. Health and owner-key responses now identify the service as `kluchcal-relay`; upgrade the app to recognize that name before updating a connected relay.
 
