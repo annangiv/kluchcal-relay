@@ -1,7 +1,7 @@
 {
-  // Oraplot relay. Runs in YOUR Cloudflare account and makes its own key on
+  // KluchCal relay. Runs in YOUR Cloudflare account and makes its own key on
   // first start (kept in the RelayKeys Durable Object). Set WEBHOOK_URL and RELAY_PAIRING_TOKEN (32+ random characters).
-  "name": "oraplot-relay",
+  "name": "kluchcal-relay",
   "main": "src/index.ts",
   "compatibility_date": "2026-09-01",
   "workers_dev": true,
@@ -10,9 +10,9 @@
   "durable_objects": { "bindings": [{ "name": "KEYS", "class_name": "RelayKeys" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RelayKeys"] }],
   "vars": {
-    // Leave as is. Only change for a self-hosted Oraplot.
-    "ORAPLOT_ORIGIN": "https://oraplot.com",
-    // Leave empty in production. For local testing, paste the key Oraplot shows.
-    "ORAPLOT_PUBLIC_KEY": ""
+    // Leave as is. Only change for a self-hosted KluchCal.
+    "KLUCHCAL_ORIGIN": "https://kluchcal.com",
+    // Leave empty in production. For local testing, paste the key KluchCal shows.
+    "KLUCHCAL_PUBLIC_KEY": ""
   }
 }

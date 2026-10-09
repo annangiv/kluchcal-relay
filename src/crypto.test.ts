@@ -1,11 +1,11 @@
-// Interop test: data sealed with libsodium, exactly as Oraplot's browser does
+// Interop test: data sealed with libsodium, exactly as KluchCal's browser does
 // it, must open with the relay's @noble implementation. Run: npm test
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import sodium from 'libsodium-wrappers-sumo'
 import { decryptSubmission, fromB64, sealOpen, toB64 } from './crypto.ts'
 
-test('relay opens what the Oraplot browser seals', async () => {
+test('relay opens what the KluchCal browser seals', async () => {
   await sodium.ready
   const s = sodium
   const relay = s.crypto_box_keypair() // the relay's own key pair

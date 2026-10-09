@@ -79,7 +79,7 @@ function lines(r: Readable, bold: (s: string) => string, max: number) {
   for (const a of r.answers) {
     const next = `\n${bold(a.question)}\n${answerText(a.answer)}\n`
     if (text.length + next.length > max - 40) {
-      text += '\n…more answers in Oraplot'
+      text += '\n…more answers in KluchCal'
       break
     }
     text += next
@@ -93,7 +93,7 @@ export function bodyFor(target: Target, r: Readable): unknown {
       return { text: lines(r, (s) => `*${s.replace(/\*/g, '')}*`, 3000) }
     case 'discord':
       return {
-        username: 'Oraplot',
+        username: 'KluchCal',
         content: lines(r, (s) => `**${s.replace(/\*/g, '')}**`, 2000),
         allowed_mentions: { parse: [] },
       }
@@ -125,6 +125,6 @@ function teamsCard(r: Readable) {
     { type: 'TextBlock', text: `New response: ${r.form.title}`, weight: 'Bolder', size: 'Medium', wrap: true },
     { type: 'FactSet', facts },
   ]
-  if (r.answers.length > facts.length) body.push({ type: 'TextBlock', text: '…more answers in Oraplot', isSubtle: true, wrap: true })
+  if (r.answers.length > facts.length) body.push({ type: 'TextBlock', text: '…more answers in KluchCal', isSubtle: true, wrap: true })
   return { $schema: 'http://adaptivecards.io/schemas/adaptive-card.json', type: 'AdaptiveCard', version: '1.4', body }
 }

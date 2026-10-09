@@ -47,7 +47,7 @@ export function sealOpen(sealed: Uint8Array, publicKey: Uint8Array, secretKey: U
   return xsalsa20poly1305(boxKey(epk, secretKey), nonce).decrypt(sealed.subarray(32))
 }
 
-/** libsodium XChaCha20-Poly1305 (IETF) with the Oraplot `nonce || ct` framing. */
+/** libsodium XChaCha20-Poly1305 (IETF) with the KluchCal `nonce || ct` framing. */
 export function aeadOpen(blob: Uint8Array, key: Uint8Array, context: string): Uint8Array {
   if (blob.length < 24 + 16) throw new Error('ciphertext too short')
   return xchacha20poly1305(key, blob.subarray(0, 24), new TextEncoder().encode(context)).decrypt(blob.subarray(24))
@@ -67,7 +67,7 @@ export function toB64(bytes: Uint8Array): string {
 }
 
 /**
- * The same chain a Oraplot browser follows: the relay's grant opens the form
+ * The same chain a KluchCal browser follows: the relay's grant opens the form
  * key, the form key opens the response key, the response key opens the answers.
  */
 export function decryptSubmission(

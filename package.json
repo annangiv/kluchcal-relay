@@ -1,7 +1,7 @@
 {
-  "name": "oraplot-relay",
+  "name": "kluchcal-relay",
   "version": "1.0.0",
-  "description": "Customer-owned encrypted booking integrations and reminder events for Oraplot",
+  "description": "Customer-owned encrypted booking integrations and reminder events for KluchCal",
   "main": "index.js",
   "scripts": {
     "test": "node --test src/crypto.test.ts src/format.test.ts src/ownership.test.ts",

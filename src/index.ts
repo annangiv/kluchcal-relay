@@ -1,12 +1,12 @@
-/** Customer-owned Oraplot relay. Private keys and decrypted data stay in this account. */
+/** Customer-owned KluchCal relay. Private keys and decrypted data stay in this account. */
 import {DurableObject} from 'cloudflare:workers'
 import {tokenMatches,validBinding,sameBinding,type Binding} from './ownership'
 import {ed25519,x25519} from '@noble/curves/ed25519.js'
 import {decryptSubmission,fromB64,publicKeyFor,toB64} from './crypto'
 import {targetFor,bodyFor,type Readable} from './format'
 export interface Env {
- KEYS:DurableObjectNamespace<RelayKeys>;WEBHOOK_URL:string;ORAPLOT_ORIGIN?:string;
- RELAY_PAIRING_TOKEN:string;WEBHOOK_IDEMPOTENT?:string;ORAPLOT_PUBLIC_KEY?:string;WEBHOOK_SERVICE?:Fetcher;WEBHOOK_FORMAT?:string;
+ KEYS:DurableObjectNamespace<RelayKeys>;WEBHOOK_URL:string;KLUCHCAL_ORIGIN?:string;ORAPLOT_ORIGIN?:string;
+ RELAY_PAIRING_TOKEN:string;WEBHOOK_IDEMPOTENT?:string;KLUCHCAL_PUBLIC_KEY?:string;ORAPLOT_PUBLIC_KEY?:string;WEBHOOK_SERVICE?:Fetcher;WEBHOOK_FORMAT?:string;
 }
 type Delivery={integration_id:string;workspace_id:string;event:string;booking:{id:string;version:number;starts_at?:string;ends_at?:string;status?:string};form?:{id:string;title:string};submission?:{id:string;key_version:number;sealed_key:string;ciphertext:string;created_at:number};sealed_form_sk?:string}
 type Job={delivery:Delivery;next:number;attempts:number;reminderAt?:number;sent:boolean;sending?:boolean;blocked?:boolean}
@@ -75,7 +75,7 @@ export class RelayKeys extends DurableObject<Env> {
      const out=await this.output(job.delivery,reminder?'reminder':job.delivery.event)
      const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),10000)
      let response:Response
-     try {const init={method:'POST',headers:{'content-type':'application/json','user-agent':'oraplot-relay/2','idempotency-key':`${job.delivery.integration_id}:${job.delivery.booking.id}:${job.delivery.booking.version}:${reminder?'reminder':job.delivery.event}`},body:JSON.stringify(out),signal:controller.signal};response=this.env.WEBHOOK_SERVICE?await this.env.WEBHOOK_SERVICE.fetch(this.env.WEBHOOK_URL,init):await fetch(this.env.WEBHOOK_URL,init)}finally{clearTimeout(timer)}
+     try {const init={method:'POST',headers:{'content-type':'application/json','user-agent':'kluchcal-relay/2','idempotency-key':`${job.delivery.integration_id}:${job.delivery.booking.id}:${job.delivery.booking.version}:${reminder?'reminder':job.delivery.event}`},body:JSON.stringify(out),signal:controller.signal};response=this.env.WEBHOOK_SERVICE?await this.env.WEBHOOK_SERVICE.fetch(this.env.WEBHOOK_URL,init):await fetch(this.env.WEBHOOK_URL,init)}finally{clearTimeout(timer)}
      if(!response.ok)throw new Error('destination did not accept delivery')
      if(reminder)delete job.reminderAt;else job.sent=true
      job.attempts=0;job.sending=false
@@ -93,6 +93,7 @@ export class RelayKeys extends DurableObject<Env> {
   })
  }
  async output(d:Delivery,event:string){
+  // Stable event discriminator for existing receivers; the product name is KluchCal.
   const common={source:'oraplot',event,event_id:`${d.booking.id}:${d.booking.version}:${event}`,booking:d.booking}
   if(event==='deleted')return common
   if(!d.submission||!d.form||!d.sealed_form_sk)throw new Error('missing encrypted envelope')
@@ -107,22 +108,27 @@ export class RelayKeys extends DurableObject<Env> {
  }
  private async readSecret(){const sk=await this.ctx.storage.get<Uint8Array>('relay_sk');if(!sk)throw new Error('key not initialized');return new Uint8Array(sk)}
 }
-let cached:{key:Uint8Array;at:number}|null=null
+let cached:{key:Uint8Array;at:number;origin:string}|null=null
 async function signingKey(env:Env,refresh=false){
- if(env.ORAPLOT_PUBLIC_KEY)return fromB64(env.ORAPLOT_PUBLIC_KEY)
- if(!refresh&&cached&&Date.now()-cached.at<3600000)return cached.key
- const origin=(env.ORAPLOT_ORIGIN||'https://oraplot.com').replace(/\/$/,'')
- const r=await fetch(origin+'/.well-known/oraplot-delivery-key');if(!r.ok)throw new Error('signing key unavailable')
- const data=await r.json() as {public_key:string};cached={key:fromB64(data.public_key),at:Date.now()};return cached.key
+ const pinned=env.KLUCHCAL_PUBLIC_KEY||env.ORAPLOT_PUBLIC_KEY
+ if(pinned)return fromB64(pinned)
+ const origin=(env.KLUCHCAL_ORIGIN||env.ORAPLOT_ORIGIN||'https://kluchcal.com').replace(/\/$/,'')
+ if(!refresh&&cached&&cached.origin===origin&&Date.now()-cached.at<3600000)return cached.key
+ let r=await fetch(origin+'/.well-known/kluchcal-delivery-key')
+ // Existing app deployments expose only the legacy path. Both keys are read
+ // from the configured trusted origin; an operational failure does not downgrade.
+ if(r.status===404||r.status===410)r=await fetch(origin+'/.well-known/oraplot-delivery-key')
+ if(!r.ok)throw new Error('signing key unavailable')
+ const data=await r.json() as {public_key:string};cached={key:fromB64(data.public_key),at:Date.now(),origin};return cached.key
 }
 export default {
  async fetch(request:Request,env:Env){
   const u=new URL(request.url);const state=env.KEYS.get(env.KEYS.idFromName('relay'))
-  if(request.method==='GET'&&u.pathname==='/')return json({service:'oraplot-relay',ok:true,pairing_required:true,webhook_configured:Boolean(env.WEBHOOK_URL)})
+  if(request.method==='GET'&&u.pathname==='/')return json({service:'kluchcal-relay',ok:true,pairing_required:true,webhook_configured:Boolean(env.WEBHOOK_URL)})
   if(['/key','/pair','/retry'].includes(u.pathname)){
    if(request.method!=='POST')return json({error:'method not allowed'},405)
    if(!await tokenMatches(request.headers.get('authorization'),env.RELAY_PAIRING_TOKEN))return json({error:'owner pairing code required'},403)
-   if(u.pathname==='/key')return json({service:'oraplot-relay',public_key:toB64(publicKeyFor(await state.secretKey())),webhook_configured:Boolean(env.WEBHOOK_URL)})
+   if(u.pathname==='/key')return json({service:'kluchcal-relay',public_key:toB64(publicKeyFor(await state.secretKey())),webhook_configured:Boolean(env.WEBHOOK_URL)})
    const text=await limitedText(request);if(text===null)return json({error:'payload too large'},413)
    let binding:Binding & {booking_id?:string};try{binding=JSON.parse(text)}catch{return json({error:'invalid JSON'},400)}
    if(!validBinding(binding))return json({error:'invalid binding'},400)
@@ -132,9 +138,11 @@ export default {
   if(request.method!=='POST'||!['/deliver','/revoke'].includes(u.pathname))return json({error:'not found'},404)
   if(!env.WEBHOOK_URL&&u.pathname==='/deliver')return json({error:'Set WEBHOOK_URL in your Cloudflare account'},500)
   const body=await limitedText(request);if(body===null)return json({error:'payload too large'},413)
-  const ts=Number(request.headers.get('x-oraplot-timestamp')||0);if(!ts||Math.abs(Date.now()/1000-ts)>300)return json({error:'stale request'},401)
+  // Select one complete header family, never mix a new timestamp with an old signature.
+  const prefix=request.headers.has('x-kluchcal-timestamp')||request.headers.has('x-kluchcal-signature')?'x-kluchcal':'x-oraplot'
+  const ts=Number(request.headers.get(`${prefix}-timestamp`)||0);if(!ts||Math.abs(Date.now()/1000-ts)>300)return json({error:'stale request'},401)
   const message=new TextEncoder().encode(`${ts}.${body}`)
-  async function verify(refresh:boolean){try{const sig=fromB64(request.headers.get('x-oraplot-signature')||'');return sig.length===64&&ed25519.verify(sig,message,await signingKey(env,refresh))}catch{return false}}
+  async function verify(refresh:boolean){try{const sig=fromB64(request.headers.get(`${prefix}-signature`)||'');return sig.length===64&&ed25519.verify(sig,message,await signingKey(env,refresh))}catch{return false}}
   if(!await verify(false)&&!await verify(true))return json({error:'bad signature'},401)
   try{
    const d=JSON.parse(body) as Delivery

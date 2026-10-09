@@ -46,7 +46,7 @@ test('long responses are cut to the chat limit', () => {
   const big = { ...r, answers: Array.from({ length: 200 }, (_, i) => ({ id: `${i}`, question: `Q${i}`, type: 'long_text', answer: 'x'.repeat(100) })) }
   const d = bodyFor('discord', big) as { content: string }
   assert.ok(d.content.length <= 2000)
-  assert.match(d.content, /more answers in Oraplot/)
+  assert.match(d.content, /more answers in KluchCal/)
 })
 
 test('webhooks get flat fields keyed by question', () => {
